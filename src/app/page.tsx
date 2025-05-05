@@ -28,10 +28,12 @@ export default function MotorControl() {
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const ROSBRIDGE_URL = process.env.NEXT_PUBLIC_ROSBRIDGE_URL!;
+
   // 1. Conectar a rosbridge al montar el componente
   useEffect(() => {
     const rosConn = new ROSLIB.Ros({
-      url: "ws://localhost:9090"
+      url: ROSBRIDGE_URL
     });
     
     rosConn.on("connection", () => {
