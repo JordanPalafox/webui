@@ -1,103 +1,206 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect, useRef } from "react";
+import ROSLIB from "roslib";
+
+// Definir la interfaz para el resultado del servicio
+interface MotorServiceResult {
+  success: boolean;
+  message?: string;
+  previous_positions?: number[];
+}
+
+// Función para convertir grados a radianes
+const degreesToRadians = (degrees: number): number => {
+  return degrees * (Math.PI / 180);
+};
+
+// Función para convertir radianes a grados
+const radiansToDegrees = (radians: number): number => {
+  return radians * (180 / Math.PI);
+};
+
+export default function MotorControl() {
+  const serviceRef = useRef<ROSLIB.Service | undefined>(undefined);
+  const [angleDegrees, setAngleDegrees] = useState(0); // Ángulo en grados
+  const [motorId, setMotorId] = useState(1);
+  const [connected, setConnected] = useState(false);
+  const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // 1. Conectar a rosbridge al montar el componente
+  useEffect(() => {
+    const rosConn = new ROSLIB.Ros({
+      url: "ws://localhost:9090"
+    });
+    
+    rosConn.on("connection", () => {
+      console.log("✅ Conectado a ROSBridge");
+      setConnected(true);
+      setLastMessage("Conectado a ROSBridge correctamente");
+    });
+    
+    rosConn.on("error", (err: Error) => {
+      console.error("❌ Error de conexión a ROSBridge:", err);
+      setConnected(false);
+      setLastMessage(`Error de conexión: ${err.message}`);
+    });
+    
+    rosConn.on("close", () => {
+      console.log("⚠️ Conexión a ROSBridge cerrada");
+      setConnected(false);
+      setLastMessage("Conexión a ROSBridge cerrada");
+    });
+
+    // Crear el servicio una vez conectado
+    serviceRef.current = new ROSLIB.Service({
+      ros: rosConn,
+      name: "/westwood_motor/set_motor_id_and_target",
+      serviceType: "westwood_motor_interfaces/SetMotorIdAndTarget"
+    });
+
+    // Cleanup al desmontar
+    return () => {
+      rosConn.close();
+    };
+  }, []);
+
+  // 2. Función para llamar al servicio con la posición deseada
+  const callMotorService = (motorId: number, angleDeg: number) => {
+    if (!serviceRef.current) {
+      console.warn("Servicio no inicializado aún");
+      setLastMessage("Servicio no inicializado. ¿Está corriendo rosbridge?");
+      return;
+    }
+
+    setLoading(true);
+    setLastMessage("Enviando comando al motor...");
+
+    // Convertir de grados a radianes para el servicio
+    const angleRad = degreesToRadians(angleDeg);
+
+    const request = new ROSLIB.ServiceRequest({
+      motor_ids: [motorId],           // ID del motor a controlar
+      target_positions: [angleRad]    // posición en radianes
+    });
+
+    serviceRef.current.callService(request, (result: MotorServiceResult) => {
+      setLoading(false);
+      if (result.success) {
+        // Convertir la posición anterior de radianes a grados para mostrarla
+        const prevPositionRad = result.previous_positions?.[0] || 0;
+        const prevPositionDeg = radiansToDegrees(prevPositionRad);
+        
+        setLastMessage(`✔️ Motor ${motorId} movido de ${prevPositionDeg.toFixed(1)}° a ${angleDeg.toFixed(1)}°`);
+        console.log("✔️ Motor movido:", result.previous_positions);
+      } else {
+        setLastMessage(`❌ Error: ${result.message || "Error desconocido"}`);
+        console.error("❌ Error en servicio:", result.message);
+      }
+    }, (error) => {
+      setLoading(false);
+      setLastMessage(`❌ Error en la llamada al servicio: ${error}`);
+      console.error("Error en la llamada al servicio:", error);
+    });
+  };
+
+  // 3. Al cambiar el slider, actualizamos localmente y llamamos al servicio
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newAngleDeg = parseFloat(e.target.value);
+    setAngleDegrees(newAngleDeg);
+    callMotorService(motorId, newAngleDeg);
+  };
+
+  // Manejar cambio de ID del motor
+  const handleMotorIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newId = parseInt(e.target.value);
+    setMotorId(newId);
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">Control de Motor Westwood</h1>
+      
+      <div className="mb-4 flex items-center">
+        <div className={`w-3 h-3 rounded-full mr-2 ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+        <span>{connected ? 'Conectado a ROSBridge' : 'Desconectado'}</span>
+      </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+      {lastMessage && (
+        <div className="mb-6 p-3 border rounded">
+          {lastMessage}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      )}
+      
+      <div className="mb-6">
+        <label htmlFor="motor-id" className="block mb-2">
+          ID del Motor:
+        </label>
+        <input
+          id="motor-id"
+          type="number"
+          min="1"
+          max="254"
+          value={motorId}
+          onChange={handleMotorIdChange}
+          className="border rounded p-2 w-20"
+        />
+      </div>
+
+      <div className="mb-6">
+        <label htmlFor="motor-slider" className="block mb-2">
+          Ángulo objetivo: {angleDegrees.toFixed(1)}° ({degreesToRadians(angleDegrees).toFixed(4)} rad)
+        </label>
+        <input
+          id="motor-slider"
+          type="range"
+          min="-360"
+          max="360"
+          step="1"
+          value={angleDegrees}
+          onChange={handleSliderChange}
+          disabled={loading || !connected}
+          className="w-full"
+        />
+      </div>
+      
+      <div className="flex flex-wrap gap-2 justify-between">
+        <button 
+          onClick={() => callMotorService(motorId, -360)}
+          disabled={loading || !connected}
+          className="bg-blue-500 text-white py-2 px-4 rounded disabled:bg-gray-300"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+          -360°
+        </button>
+        <button 
+          onClick={() => callMotorService(motorId, -180)}
+          disabled={loading || !connected}
+          className="bg-blue-500 text-white py-2 px-4 rounded disabled:bg-gray-300"
         >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+          -180°
+        </button>
+        <button 
+          onClick={() => callMotorService(motorId, 0)}
+          disabled={loading || !connected}
+          className="bg-blue-500 text-white py-2 px-4 rounded disabled:bg-gray-300"
         >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          0°
+        </button>
+        <button 
+          onClick={() => callMotorService(motorId, 180)}
+          disabled={loading || !connected}
+          className="bg-blue-500 text-white py-2 px-4 rounded disabled:bg-gray-300"
+        >
+          180°
+        </button>
+        <button 
+          onClick={() => callMotorService(motorId, 360)}
+          disabled={loading || !connected}
+          className="bg-blue-500 text-white py-2 px-4 rounded disabled:bg-gray-300"
+        >
+          360°
+        </button>
+      </div>
     </div>
   );
 }
