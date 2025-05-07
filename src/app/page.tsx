@@ -207,7 +207,7 @@ export default function MotorControl() {
                 {/* Motor indicator */}
                 <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center relative">
                   <div
-                    className="absolute w-full h-full"
+                    className="absolute w-full h-full transition-transform duration-300"
                     style={{ transform: `rotate(${angleDegrees}deg)` }}
                   >
                     <div className="absolute top-0 left-1/2 -ml-0.5 w-1 h-12 bg-red-500"></div>
